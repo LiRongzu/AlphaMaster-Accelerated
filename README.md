@@ -1,14 +1,62 @@
-# AlphaMaster
+# AlphaMaster-Accelerated
 
-基于深度神经网络强化学习的量化因子挖掘中心：从 Parquet / MT5 K 线自动搜索可解释因子公式，支持 Web 端训练、回测与实时信号分析。
+AlphaMaster 的**非官方性能导向 Fork / 变体**。本仓库基于 [rosemarycox5334-debug/AlphaMaster](https://github.com/rosemarycox5334-debug/AlphaMaster)，目标是在尽量保持原始 reward、公式搜索空间和 walk-forward 评分语义不变的前提下，减少 evaluator 与训练过程中的重复计算和执行开销。
 
-**QQ 交流群：1063897401**
+> **Upstream attribution**
+>
+> 原始项目及主要设计归属于 [rosemarycox5334-debug/AlphaMaster](https://github.com/rosemarycox5334-debug/AlphaMaster)。本仓库不是 upstream 官方发布，也不代表原作者对本变体的背书。
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
 
+- **本变体仓库**：[LiRongzu/AlphaMaster-Accelerated](https://github.com/LiRongzu/AlphaMaster-Accelerated)
+- **原始 upstream**：[rosemarycox5334-debug/AlphaMaster](https://github.com/rosemarycox5334-debug/AlphaMaster)
+- **Upstream PR**：[PR #6 — Optimize exact EMA and walk-forward evaluation](https://github.com/rosemarycox5334-debug/AlphaMaster/pull/6)
+- **原项目 QQ 交流群**：1063897401
+
 ![Web 控制台总览](docs/images/00_hero.png)
 
-仓库地址：[github.com/rosemarycox5334-debug/AlphaMaster](https://github.com/rosemarycox5334-debug/AlphaMaster)
+---
+
+## 本变体修改了什么
+
+当前 `main` 只包含已经通过专项一致性测试的 **exact CPU acceleration**，没有把尚在研究中的 GPU / WF-score fusion 代码混入稳定分支。
+
+| 优化 | 原始做法 | 当前做法 | 科学语义 |
+|------|----------|----------|----------|
+| **Exact EMA CPU recurrence** | Python / PyTorch 顺序递推 | CPU 上使用 `scipy.signal.lfilter` 的 compiled recurrence；CUDA / autograd / 不支持场景保留 reference fallback | 保持原递推与初值定义 |
+| **Exact walk-forward evaluator cache** | rolling WF 中重叠窗口会重复计算 | 每条公式先计算一次完整 `position / turnover / pnl`，再复用 unique windows、Sortino、fold IC 等结果 | 不改变 reward / search space / WF 定义 |
+
+基于当时最新 upstream `main`（`4a0e851`）重新移植后，专项测试结果：
+
+```text
+14 passed
+```
+
+覆盖：
+
+```text
+tests/unit/test_ema_exact_backend.py
+tests/unit/test_p1b_wf_cache_equivalence.py
+```
+
+### 为什么会快很多
+
+原版 evaluator 的主要问题不是模型本身太大，而是**大量小计算被重复执行**：长序列 EMA 逐点递推，walk-forward 的重叠窗口又反复计算相同的中间量。本变体把这些“重复劳动”改成 compiled recurrence + 缓存 / 复用，因此不需要通过改变公式评分标准来换速度。
+
+开发阶段在 ETHUSDT 15m 长历史数据上的代表性 EMA 测量为：
+
+```text
+EMA_5:  ~6.54 s -> ~0.052 s cold
+EMA_20: ~6.60 s -> ~0.00175 s
+```
+
+这些数字只用于说明原始热点的量级，**不是对所有数据、硬件或完整训练流程的通用加速承诺**。
+
+### GPU 路线状态
+
+我们还单独研究了 SDPA、elite single-pass、`torch.compile` 和 WF-score fusion。GPU compile 路线在独立实验中表现出额外的工程加速，但 CPU / GPU 会因为随机采样拓扑与浮点执行路径不同而产生 trajectory divergence，因此当前公开稳定 `main` 仍以 exact CPU evaluator 为基准。
+
+WF-score fusion 目前也**没有**合入稳定分支：它短期数值非常接近，但长轨迹中微小 scorer 浮点差异会被搜索过程递归放大，仍需要 population-level 结果验证。
 
 ---
 
@@ -148,4 +196,4 @@ python scripts/capture_readme_shots.py
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=rosemarycox5334-debug/AlphaMaster&type=date&legend=top-left)](https://www.star-history.com/#rosemarycox5334-debug/AlphaMaster&type=date&legend=top-left)
+[![Star History Chart](https://api.star-history.com/svg?repos=LiRongzu/AlphaMaster-Accelerated&type=date&legend=top-left)](https://www.star-history.com/#LiRongzu/AlphaMaster-Accelerated&type=date&legend=top-left)
